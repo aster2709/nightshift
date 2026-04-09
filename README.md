@@ -24,38 +24,56 @@ nightshift status  # check progress
 
 ## How It Works
 
-```
-nightshift init
-  |
-  +--> Detect project type, ask mission/constraints/eval
-  |
-  +--> Generate program.md (agent instructions)
-  |
-  +--> Discovery: Claude explores the entire codebase and
-  |    generates .nightshift/codebase.md - architecture,
-  |    dependency map, invariants, danger zones.
-  |    (spinner with rotating status messages while you wait)
+```mermaid
+graph TD
+    subgraph INIT ["nightshift init"]
+        A[Detect project type] --> B[Ask mission, constraints, eval]
+        B --> C[Generate program.md<br/><i>agent instructions</i>]
+        C --> D[Discovery pass<br/><i>generates codebase.md</i>]
+    end
 
-nightshift run
-  |
-  +--> Preflight: clean git? eval green? claude CLI exists?
-  |
-  +--> Create branch (nightshift/dev)
-  |
-  +--> Loop:
-  |      |
-  |      +--> Claude reads codebase.md + program.md + notes.md
-  |      |
-  |      +--> Does ONE unit of work
-  |      |
-  |      +--> Eval gate (your commands, in order)
-  |      |      |
-  |      |     PASS --> commit + log to notes.md
-  |      |     FAIL --> hard reset + log failure + retry
-  |      |
-  |      +--> Circuit breaker: 3 consecutive fails = stop
-  |
-  +--> Done. Review: git log --oneline main..nightshift/dev
+    subgraph RUN ["nightshift run"]
+        E[Preflight checks<br/><i>clean git, eval green, claude CLI</i>] --> F[Create branch<br/><i>nightshift/dev</i>]
+        F --> G[Claude reads<br/>codebase.md + program.md + notes.md]
+        G --> H[ONE unit of work]
+        H --> I{Eval gate}
+        I -->|PASS| J[Commit + log to notes.md]
+        I -->|FAIL| K[Hard reset + log failure]
+        J --> L{More iterations?}
+        K --> M{Circuit breaker?}
+        M -->|< 3 consecutive fails| L
+        M -->|3 consecutive fails| N[Stop]
+        L -->|Yes| G
+        L -->|No| N
+    end
+
+    D --> E
+
+    style INIT fill:#1a1a2e,stroke:#e94560,color:#fff
+    style RUN fill:#1a1a2e,stroke:#e94560,color:#fff
+    style I fill:#0f3460,stroke:#e94560,color:#fff
+    style J fill:#1b4332,stroke:#2d6a4f,color:#fff
+    style K fill:#641220,stroke:#a4161a,color:#fff
+    style N fill:#0f3460,stroke:#e94560,color:#fff
+```
+
+### The loop in detail
+
+```mermaid
+graph LR
+    subgraph EACH ["Each iteration"]
+        direction TB
+        P[Read codebase.md<br/><i>architecture, dependencies,<br/>danger zones</i>] --> Q[Read notes.md<br/><i>what previous iterations did</i>]
+        Q --> R[Pick ONE task]
+        R --> S[Implement]
+        S --> T[Run eval commands<br/><i>in order, short-circuit on fail</i>]
+        T -->|All pass| U[Write summary.txt]
+        T -->|Any fail| V[Reset all changes<br/><i>preserve .nightshift/ state</i>]
+    end
+
+    style EACH fill:#1a1a2e,stroke:#e94560,color:#fff
+    style U fill:#1b4332,stroke:#2d6a4f,color:#fff
+    style V fill:#641220,stroke:#a4161a,color:#fff
 ```
 
 ## Init
