@@ -427,17 +427,25 @@ while [ "$iteration" -lt "$MAX_ITERATIONS" ]; do
       summary=$(head -1 "$NIGHTSHIFT_DIR/summary.txt")
     fi
 
-    # Append to notes BEFORE commit so notes are included in the commit
-    echo "- **Iteration $iteration** ($(date '+%H:%M')): $summary" >> "$NIGHTSHIFT_DIR/notes.md"
-
-    # Stage everything except iteration logs (they can be large and are ephemeral)
+    # Check if there are actually any code changes to commit
     git add -A
     git reset -- "$LOG_DIR"/*.log > /dev/null 2>&1 || true
-    git commit -m "nightshift($iteration): $summary" --no-verify 2>/dev/null || true
 
-    consecutive_failures=0
-    successful_commits=$((successful_commits + 1))
-    log "  COMMITTED: $summary"
+    if git diff --cached --quiet; then
+      # No changes to commit — agent did nothing or only read files
+      log "  NO CHANGES: agent produced no code changes, skipping commit"
+      echo "- **Iteration $iteration** ($(date '+%H:%M')): no changes (eval passed but nothing modified)" >> "$NIGHTSHIFT_DIR/notes.md"
+      consecutive_failures=0
+    else
+      # Append to notes BEFORE commit so notes are included in the commit
+      echo "- **Iteration $iteration** ($(date '+%H:%M')): $summary" >> "$NIGHTSHIFT_DIR/notes.md"
+      git add "$NIGHTSHIFT_DIR/notes.md"
+      git commit -m "nightshift($iteration): $summary" --no-verify 2>/dev/null || true
+
+      consecutive_failures=0
+      successful_commits=$((successful_commits + 1))
+      log "  COMMITTED: $summary"
+    fi
 
   else
     # ── FAILURE: reset ─────────────────────────────────────────────────

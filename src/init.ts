@@ -22,34 +22,15 @@ function cancel(message = 'Init cancelled.'): never {
   process.exit(0)
 }
 
-const DISCOVERY_MESSAGES = [
-  'Mapping project structure...',
-  'Reading source files...',
-  'Tracing module dependencies...',
-  'Identifying architectural patterns...',
-  'Cataloging shared types and interfaces...',
-  'Analyzing import chains...',
-  'Detecting high blast-radius files...',
-  'Learning error handling conventions...',
-  'Mapping data flow between systems...',
-  'Documenting API contracts...',
-  'Identifying invariants and business rules...',
-  'Cataloging test patterns...',
-  'Analyzing naming conventions...',
-  'Building dependency graph...',
-  'Identifying danger zones...',
-  'Understanding the harmony between modules...',
-  'Almost there, finalizing overview...',
-]
-
 function runClaudeAsync(prompt: string, cwd: string, timeout = 180_000): Promise<string> {
   return new Promise((resolve, reject) => {
+    // Write prompt to temp file and use shell redirection to pipe it.
+    // This avoids argument length limits and shell escaping issues.
     const tmpFile = path.join(cwd, NIGHTSHIFT_DIR, '.tmp_prompt.txt')
     fs.writeFileSync(tmpFile, prompt, 'utf-8')
 
-    const child = spawn('claude', [
-      '-p', fs.readFileSync(tmpFile, 'utf-8'),
-      '--output-format', 'text',
+    const child = spawn('bash', [
+      '-c', `claude -p "$(cat '${tmpFile}')" --output-format text`,
     ], {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -489,25 +470,16 @@ export async function init(): Promise<void> {
   const codebasePath = path.join(nightshiftDir, 'codebase.md')
 
   if (claudeAvailable) {
-    spin.start(DISCOVERY_MESSAGES[0])
-
-    // Rotate spinner messages while Claude explores
-    let msgIndex = 0
-    const messageInterval = setInterval(() => {
-      msgIndex = (msgIndex + 1) % DISCOVERY_MESSAGES.length
-      spin.message(DISCOVERY_MESSAGES[msgIndex])
-    }, 4000)
+    spin.start('Generating codebase overview...')
 
     try {
       const discoveryPrompt = loadDiscoveryPrompt(cwd)
       const codebaseContent = await runClaudeAsync(discoveryPrompt, cwd, 180_000)
 
-      clearInterval(messageInterval)
       fs.writeFileSync(codebasePath, codebaseContent + '\n', 'utf-8')
       spin.stop(`Codebase overview generated (${(codebaseContent.length / 1024).toFixed(1)}KB)`)
       p.log.success('Wrote .nightshift/codebase.md')
     } catch {
-      clearInterval(messageInterval)
       spin.stop('Discovery skipped (will run on first nightshift run instead)')
     }
   } else {
