@@ -1,5 +1,5 @@
 {
-  "name": "nightshift-dev",
+  "name": "nightshift",
   "version": "0.1.0",
   "description": "Autonomous overnight development loop for Claude Code. Sleep while your codebase ships.",
   "type": "module",
@@ -39,7 +39,7 @@
     "ci"
   ],
   "license": "MIT",
-  "author": "Yash Mehta <yash@0xaster.com>",
+  "author": "Yash Mehta <ymehta777@gmail.com>",
   "repository": {
     "type": "git",
     "url": "https://github.com/aster2709/nightshift"
