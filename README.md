@@ -27,69 +27,70 @@ nightshift status  # check progress
 ```mermaid
 graph TD
     subgraph INIT ["nightshift init"]
-        A[Detect project type] --> B[Ask mission, constraints, eval]
-        B --> C[Generate program.md<br/><i>agent instructions</i>]
-        C --> D[Discovery pass<br/><i>generates codebase.md</i>]
+        A[Detect project type] --> B[Select mode + steering guidance]
+        B --> C[Configure eval gate + constraints]
+        C --> D[Generate program.md<br/><i>agent instructions</i>]
+        D --> E[Discovery pass<br/><i>generates codebase.md</i>]
     end
 
     subgraph RUN ["nightshift run"]
-        E[Preflight checks<br/><i>clean git, eval green, claude CLI</i>] --> F[Create branch<br/><i>nightshift/dev</i>]
-        F --> G[Claude reads<br/>codebase.md + program.md + notes.md]
-        G --> H[ONE unit of work]
-        H --> I{Eval gate}
-        I -->|PASS| J[Commit + log to notes.md]
-        I -->|FAIL| K[Hard reset + log failure]
-        J --> L{More iterations?}
-        K --> M{Circuit breaker?}
-        M -->|< 3 consecutive fails| L
-        M -->|3 consecutive fails| N[Stop]
-        L -->|Yes| G
-        L -->|No| N
+        F[Preflight checks<br/><i>clean git, eval green, claude CLI</i>] --> G[Create branch<br/><i>nightshift/dev</i>]
+        G --> H[Claude reads<br/>codebase.md + program.md + notes.md]
+        H --> I[ONE unit of work]
+        I --> J{Eval gate}
+        J -->|PASS| K{Code changes?}
+        K -->|Yes| L[Commit + log to notes.md]
+        K -->|No| M[Failure: no-op]
+        J -->|FAIL| N[Hard reset + log failure]
+        L --> O{More iterations?}
+        M --> P{Circuit breaker?}
+        N --> P
+        P -->|< 3 consecutive fails| O
+        P -->|3 consecutive fails| Q[Stop]
+        O -->|Yes| H
+        O -->|No| Q
     end
 
-    D --> E
+    E --> F
 
     style INIT fill:#1a1a2e,stroke:#e94560,color:#fff
     style RUN fill:#1a1a2e,stroke:#e94560,color:#fff
-    style I fill:#0f3460,stroke:#e94560,color:#fff
-    style J fill:#1b4332,stroke:#2d6a4f,color:#fff
-    style K fill:#641220,stroke:#a4161a,color:#fff
-    style N fill:#0f3460,stroke:#e94560,color:#fff
+    style J fill:#0f3460,stroke:#e94560,color:#fff
+    style K fill:#0f3460,stroke:#e94560,color:#fff
+    style L fill:#1b4332,stroke:#2d6a4f,color:#fff
+    style M fill:#641220,stroke:#a4161a,color:#fff
+    style N fill:#641220,stroke:#a4161a,color:#fff
+    style Q fill:#0f3460,stroke:#e94560,color:#fff
 ```
 
-### The loop in detail
+## Modes
 
-```mermaid
-graph LR
-    subgraph EACH ["Each iteration"]
-        direction TB
-        P[Read codebase.md<br/><i>architecture, dependencies,<br/>danger zones</i>] --> Q[Read notes.md<br/><i>what previous iterations did</i>]
-        Q --> R[Pick ONE task]
-        R --> S[Implement]
-        S --> T[Run eval commands<br/><i>in order, short-circuit on fail</i>]
-        T -->|All pass| U[Write summary.txt]
-        T -->|Any fail| V[Reset all changes<br/><i>preserve .nightshift/ state</i>]
-    end
+The agent operates in one of three modes, strictly enforced:
 
-    style EACH fill:#1a1a2e,stroke:#e94560,color:#fff
-    style U fill:#1b4332,stroke:#2d6a4f,color:#fff
-    style V fill:#641220,stroke:#a4161a,color:#fff
-```
+| Mode | What It Does | What It Does NOT Do |
+|---|---|---|
+| **Add Features** | New endpoints, modules, capabilities. Explores the codebase, finds what's missing, builds it. | No refactoring, no bug fixes, no test-only commits, no "improvements" |
+| **Improve Codebase** | Fix bugs, optimize, harden error handling, add test coverage, refactor. | No new user-facing features or API endpoints |
+| **Both** | Alternates. Each iteration picks whichever is higher impact. | |
+
+The agent is **self-directed**. It reads the codebase, understands the architecture, and decides what to work on. There is no task list. You can optionally provide **steering guidance** ("focus on the API layer") as a starting direction, but the agent continues finding work autonomously when that area is covered.
 
 ## Init
 
 `nightshift init` walks you through:
 
 1. **Project detection** - scans for package.json, Cargo.toml, pyproject.toml, go.mod
-2. **Mission** - what should the agent work on? (features, improvements, both, or custom)
-3. **Constraints** - what should it NOT touch?
-4. **Eval gate** - auto-detects test/typecheck/lint commands, you confirm or edit
-5. **program.md generation** - uses Claude to generate tailored agent instructions
+2. **Mode** - add features, improve codebase, both, or custom
+3. **Steering guidance** - optional hint for where to start (not a boundary)
+4. **Constraints** - what should it NOT touch?
+5. **Eval gate** - auto-detects test/typecheck/lint commands, you confirm or edit
+6. **program.md generation** - uses Claude to generate tailored agent instructions
+7. **Discovery pass** - Claude explores the entire codebase, generates `codebase.md`
 
 Creates `.nightshift/` with:
-- `config.json` - your eval commands, branch, limits
-- `program.md` - the agent's instruction set (you own this, edit freely)
-- `codebase.md` - auto-generated codebase overview (generated on first run)
+- `config.json` - eval commands, branch, limits
+- `program.md` - agent instruction set (you own this, edit freely)
+- `codebase.md` - auto-generated codebase overview with architecture, dependency map, danger zones
 - `notes.md` - cross-iteration context (managed by nightshift)
 - `logs/` - per-iteration Claude output
 
@@ -129,7 +130,7 @@ CLI overrides: `nightshift run --iterations 50 --timeout 1800 --branch nightshif
 
 ## Discovery Pass
 
-During `nightshift init`, after generating program.md, a discovery pass generates `.nightshift/codebase.md`. This is a structured, CTO-level overview of your codebase:
+During `nightshift init`, a discovery pass generates `.nightshift/codebase.md`. This is a structured, CTO-level overview of your codebase:
 
 | Section | What It Captures |
 |---|---|
@@ -141,21 +142,23 @@ During `nightshift init`, after generating program.md, a discovery pass generate
 | **Style Guide** | Observed formatting, test patterns, import order |
 | **Danger Zones** | High blast-radius files and why they're dangerous |
 
-Every iteration reads this before touching code. This prevents the #1 agent failure mode: changing a file without realizing 12 other files import from it.
+Every iteration reads this before touching code. This prevents the #1 agent failure mode: changing a file without realizing other files depend on it.
 
 If your project already has a `CLAUDE.md`, nightshift reads it as input but generates its own file focused on *understanding* (architecture, dependencies) rather than *instructions* (what to do).
 
 ## Key Design Decisions
 
-**Discovery before work.** The agent maps the entire codebase before writing a single line. Like a CTO onboarding a new engineer: understand the system first, then change it.
+**Self-directed agent.** The agent decides what to work on by exploring the codebase. No task list needed. Steering guidance is optional and treated as a starting hint, not a boundary.
 
-**Bash loop, not Node loop.** The core orchestrator is a shell script. Zero runtime deps for a process that runs 8+ hours unattended.
+**Strict mode enforcement.** "Add features" means only features. "Improve" means only fixes and optimizations. The modes don't bleed into each other.
 
-**One unit of work per iteration.** Small, atomic, eval-gated commits. This is what makes 30+ commits overnight possible.
+**Discovery before work.** The agent maps the entire codebase before writing a single line. Like onboarding a new engineer: understand the system first, then change it.
 
-**Notes carry-forward.** Each iteration reads what previous ones did via notes.md. No memory system needed.
+**No-op is failure.** If the agent exits without code changes, it counts toward the circuit breaker. There is always work to do.
 
 **Reset on failure, not fix on failure.** If eval fails, hard reset and try fresh. Prevents the agent from spiraling into patch-on-patch loops.
+
+**Notes carry-forward.** Each iteration reads what previous ones did via notes.md. The agent builds on the trajectory, not from scratch.
 
 **No daemon, no server.** `nightshift run` is a foreground process. Run it in tmux/screen. Ctrl+C to stop.
 
@@ -163,7 +166,7 @@ If your project already has a `CLAUDE.md`, nightshift reads it as input but gene
 
 - **Review program.md before your first run.** It's the single biggest lever for quality.
 - **Start with 5-10 iterations** to calibrate, then scale up.
-- **Tighten constraints after the first run.** If the agent did low-impact work, add "focus on X, not Y" to program.md.
+- **Tighten program.md after the first run.** If the agent did low-value work, add steering guidance.
 - **Run in tmux/screen** so it survives terminal disconnects.
 
 ## License
