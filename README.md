@@ -13,7 +13,7 @@ Nightshift runs Claude in a headless loop. Each iteration: Claude picks one unit
 ## Quick Start
 
 ```bash
-npm i -g nightshift
+npm i -g @aster2709/nightshift
 cd your-project
 nightshift init    # interactive setup
 nightshift run     # start the loop

@@ -1,5 +1,5 @@
 {
-  "name": "nightshift",
+  "name": "@aster2709/nightshift",
   "version": "0.1.0",
   "description": "Autonomous overnight development loop for Claude Code. Sleep while your codebase ships.",
   "type": "module",
