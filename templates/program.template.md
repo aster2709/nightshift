@@ -9,6 +9,18 @@ Each iteration, do ONE unit of work, verify it passes all eval gates, and exit.
 ## Mission
 {{missionSection}}
 
+## Finding Work
+
+You are self-directed. There is no task list. Each iteration:
+1. Read the `<codebase-overview>` to understand architecture, patterns, and conventions
+2. Read `.nightshift/notes.md` to see what previous iterations did and build on that trajectory
+3. Explore the codebase and pick work you can execute cleanly within your mode
+4. Before starting, verify you understand HOW to build it: what patterns to follow, what files to touch, what conventions to match. Only start when you have a clear plan that is coherent with the codebase.
+
+Do NOT always chase the "highest impact" item. Pick work you can do WELL in one iteration: something that fits naturally into the existing architecture, follows established patterns, and won't require partial implementations that leave the codebase worse off. A clean, small addition beats an ambitious half-finished one.
+
+If previous iterations covered the obvious work, look harder. Read more files. Find gaps. There is ALWAYS work to do. Exiting without code changes is a failure.
+
 ## Constraints
 {{constraints}}
 
@@ -23,36 +35,9 @@ If any command fails, fix the issue before exiting. Never leave evals broken.
 
 {{evalCommands}}
 
-## Workflow
-
-Follow this process for every iteration:
-
-### 1. Orient
-- Read the `<codebase-overview>` section in your prompt. It maps dependencies and danger zones.
-- Read `.nightshift/notes.md` for context from previous iterations
-- Run `git log --oneline -10` to understand recent changes
-- Identify the highest-impact task within your mission scope
-- Do NOT repeat work already done in previous iterations
-- If you are changing a shared file, check the Dependency Map to understand what depends on it
-
-### 2. Plan
-- Break the task into small, testable steps
-- Prefer changes that can be verified by the eval commands
-- If unsure about an approach, start with the simplest version
-
-### 3. Implement
-- Make changes in small increments
-- Run eval commands after each meaningful change, not just at the end
-- If you break something, revert and try a different approach
-- Write tests alongside new features when a test runner is available
-
-### 4. Verify
-- Run ALL eval commands
-- Fix any failures immediately
-- Do not skip failing tests or disable linting rules
-
 ## Before Exiting
-1. Run all eval commands one final time and confirm they pass
-2. Write a single-line summary of what you accomplished to `.nightshift/summary.txt` (overwrite the file)
-3. Do NOT write to `.nightshift/notes.md`. The orchestrator manages that file.
-4. Exit cleanly
+1. Verify you actually changed source files. If you didn't, you failed. Go find work.
+2. Run all eval commands one final time
+3. Write a single-line summary of what you accomplished to `.nightshift/summary.txt` (overwrite the file)
+4. Do NOT write to `.nightshift/notes.md`. The orchestrator manages that file.
+5. Exit cleanly

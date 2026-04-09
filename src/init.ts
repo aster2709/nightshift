@@ -10,10 +10,10 @@ import type { ProjectInfo } from './detect.js'
 
 type MissionType = 'features' | 'improve' | 'both' | 'custom'
 
-const MISSION_PLACEHOLDERS: Record<MissionType, string> = {
-  features: 'e.g. Add user authentication, build API endpoints for orders',
-  improve: 'e.g. Fix flaky tests, add error boundaries, optimize DB queries',
-  both: 'e.g. Add search feature, then harden existing auth flow',
+const GUIDANCE_PLACEHOLDERS: Record<MissionType, string> = {
+  features: 'e.g. Focus on the API layer, or the user module (leave empty for fully autonomous)',
+  improve: 'e.g. Focus on error handling, or the database layer (leave empty for fully autonomous)',
+  both: 'e.g. Prioritize the checkout flow (leave empty for fully autonomous)',
   custom: 'Describe what the agent should do overnight',
 }
 
@@ -99,19 +99,32 @@ function loadDiscoveryPrompt(cwd: string): string {
 function buildMetaPrompt(opts: {
   projectInfo: ProjectInfo
   missionType: MissionType
-  missionScope: string
+  guidance: string
   constraints: string
   evalCommands: string[]
   existingContext: string
 }): string {
-  const { projectInfo, missionType, missionScope, constraints, evalCommands, existingContext } = opts
+  const { projectInfo, missionType, guidance, constraints, evalCommands, existingContext } = opts
 
-  const missionLabel = {
-    features: 'Add features: explore the codebase, build what is missing',
-    improve: 'Improve existing code: fix bugs, harden, optimize',
-    both: 'Alternate between adding features and improving existing code',
-    custom: 'Custom mission',
+  const modeRules = {
+    features: `MODE: Add Features ONLY.
+The agent must ONLY add new functionality. New endpoints, new modules, new capabilities.
+It must NOT: refactor existing code, fix bugs, optimize performance, add comments, or "improve" anything that already works.
+If the project has a test runner and existing tests, the agent should write tests for its new feature to prove it works and to pass the eval gate. But tests are a byproduct of the feature, not the goal. Writing tests for existing untested code is NOT allowed in this mode.
+The agent is self-directed. It explores the codebase, identifies what's missing, and builds it. There is always a feature to add.`,
+    improve: `MODE: Improve Codebase ONLY.
+The agent must ONLY fix bugs, optimize performance, harden error handling, add test coverage, refactor messy code, and improve reliability.
+It must NOT: add new user-facing features, new API endpoints, or new capabilities. The feature set stays the same. The quality goes up.
+The agent is self-directed. It explores the codebase, finds real problems, and fixes them. There is always something to improve.`,
+    both: `MODE: Features + Improvements (alternate).
+The agent should alternate between adding new features and improving existing code.
+Each iteration, pick whichever is highest impact right now. Use judgment.`,
+    custom: `MODE: Custom (see guidance below).`,
   }[missionType]
+
+  const guidanceSection = guidance
+    ? `STEERING GUIDANCE (optional hint from the user, not a task list):\n${guidance}\n\nThis is a starting direction, not a boundary. The agent should use this as a hint for where to start, but must continue finding new work autonomously when this area is exhausted.`
+    : 'No steering guidance provided. The agent is fully autonomous and decides what to work on based on its own exploration of the codebase.'
 
   return `You are generating a program.md file for an autonomous AI development agent called Nightshift.
 The agent will run Claude Code in a loop overnight with no human supervision.
@@ -122,10 +135,9 @@ PROJECT INFO:
 - Type: ${projectInfo.type}
 - Package manager: ${projectInfo.packageManager || 'unknown'}
 
-MISSION TYPE: ${missionLabel}
+${modeRules}
 
-MISSION SCOPE:
-${missionScope}
+${guidanceSection}
 
 ${constraints ? `CONSTRAINTS (things NOT to touch):\n${constraints}` : 'No explicit constraints.'}
 
@@ -135,19 +147,25 @@ ${evalCommands.map(c => `- ${c}`).join('\n')}
 ${existingContext ? `EXISTING PROJECT CONTEXT:\n${existingContext}` : ''}
 
 Generate a complete program.md with these sections:
+
 1. Identity: "You are an autonomous development agent. Each run, do ONE unit of work and exit."
-2. Mission with specific, actionable tasks derived from the scope
-3. Constraints and boundaries
-4. Eval commands the agent must run and pass
-5. Workflow: orient (read the <codebase-overview> for architecture + dependency map, read notes.md for previous iteration context), plan, implement, verify evals, exit
-6. Before exiting: run evals, write a one-line summary to .nightshift/summary.txt (overwrite), then exit
 
-IMPORTANT WORKFLOW NOTE: The agent receives a <codebase-overview> in its prompt containing architecture,
-dependency map, invariants, and danger zones. The program.md should instruct the agent to read this
-before touching any code, especially before modifying shared files.
+2. Mode: Clearly state the mode rules. What the agent IS allowed to do and what it is NOT allowed to do.
 
-IMPORTANT: The agent must NOT write to .nightshift/notes.md. The orchestrator script manages that file.
-The agent must ONLY write to .nightshift/summary.txt (one line, overwrite).
+3. How to find work: The agent must be self-directed. It reads the <codebase-overview> (architecture, patterns, dependency map, danger zones) and .nightshift/notes.md (what previous iterations did). It explores the codebase. It picks work it can execute CLEANLY in one iteration — something coherent with existing patterns and conventions. It does NOT always chase the "highest impact" item. A clean, small addition that fits the architecture beats an ambitious half-finished one.
+   Before starting any work, the agent must understand HOW to build it: what patterns to follow, what conventions to match. Only start when the plan is clear.
+   Include the steering guidance if provided, but frame it as a starting hint, not a boundary.
+
+4. Constraints and boundaries.
+
+5. Eval commands: list them, agent must run and pass all before exiting.
+
+6. CRITICAL RULE: The agent must ALWAYS produce code changes. Exiting without modifying any source files is a failure. If previous work seems "done," look harder. There is always work to do.
+
+7. Before exiting: run evals, write a one-line summary to .nightshift/summary.txt (overwrite), then exit.
+   Do NOT write to .nightshift/notes.md — the orchestrator manages that file.
+
+The agent receives a <codebase-overview> in its prompt. The program.md should instruct the agent to read this before touching any code.
 
 Be specific to THIS project. Reference actual file paths, frameworks, and patterns from the project info.
 Do NOT include any preamble or explanation. Output ONLY the markdown content of program.md.`
@@ -157,18 +175,22 @@ function buildFallbackProgram(opts: {
   template: string
   projectName: string
   missionType: MissionType
-  missionScope: string
+  guidance: string
   constraints: string
   evalCommands: string[]
   excludeDirs: string[]
 }): string {
-  const { template, projectName, missionType, missionScope, constraints, evalCommands, excludeDirs } = opts
+  const { template, projectName, missionType, guidance, constraints, evalCommands, excludeDirs } = opts
+
+  const guidanceNote = guidance
+    ? `\n\n**Steering guidance:** ${guidance}\nThis is a starting direction, not a boundary. Continue finding new work when this area is exhausted.`
+    : ''
 
   const missionLines = {
-    features: `### Mode: Add Features\nExplore the codebase and build what is missing.\n\n${missionScope}`,
-    improve: `### Mode: Improve Existing Code\nFix bugs, harden edge cases, and optimize performance.\n\n${missionScope}`,
-    both: `### Mode: Features + Improvements\nAlternate between adding new features and improving existing code.\n\n${missionScope}`,
-    custom: `### Mode: Custom\n${missionScope}`,
+    features: `### Mode: Add Features ONLY\nExplore the codebase and build new functionality. New endpoints, new modules, new capabilities.\n\n**You must NOT:** refactor existing code, fix bugs, write tests for existing code, optimize, or "improve" what already works. Tests are only allowed as part of a new feature.${guidanceNote}`,
+    improve: `### Mode: Improve Codebase ONLY\nFix bugs, optimize performance, harden error handling, add test coverage, refactor.\n\n**You must NOT:** add new user-facing features, new API endpoints, or new capabilities. The feature set stays the same, the quality goes up.${guidanceNote}`,
+    both: `### Mode: Features + Improvements\nAlternate between adding new features and improving existing code. Each iteration, pick whichever is highest impact.${guidanceNote}`,
+    custom: `### Mode: Custom\n${guidance || 'No guidance provided. Use your judgment.'}`,
   }[missionType]
 
   const evalFormatted = evalCommands.length > 0
@@ -208,37 +230,27 @@ function loadTemplate(): string {
   // Inline fallback if template file not found
   return `# Nightshift Agent - {{projectName}}
 
-You are an autonomous development agent running in a loop overnight with no human supervision.
+You are an autonomous development agent. No human is watching. Be self-directed and thorough.
 Each iteration, do ONE unit of work, verify it passes all eval gates, and exit.
-
-**You are fully autonomous. Never ask for permission, confirmation, or clarification.**
 
 ## Mission
 {{missionSection}}
 
+## Finding Work
+You are self-directed. Explore the codebase, read the <codebase-overview> and notes.md, find the highest-impact work within your mode. There is ALWAYS work to do. Exiting without code changes is a failure.
+
 ## Constraints
 {{constraints}}
 
-## Directories to Exclude
-{{excludeDirs}}
-
 ## Eval Commands
-Run ALL of these before finishing each iteration. Every command must pass.
-
 {{evalCommands}}
 
-## Workflow (each iteration)
-1. Read .nightshift/notes.md for context from previous iterations
-2. Identify the highest-impact task within your mission scope
-3. Implement the change in small, testable increments
-4. Run eval commands after each meaningful change
-5. If evals fail, fix the issue before moving on
-
 ## Before Exiting
-1. Run all eval commands one final time
-2. Write a one-line summary to .nightshift/summary.txt (overwrite)
-3. Do NOT write to .nightshift/notes.md (the orchestrator manages it)
-4. Exit cleanly
+1. Verify you actually changed source files. If not, go find work.
+2. Run all eval commands one final time
+3. Write a one-line summary to .nightshift/summary.txt (overwrite)
+4. Do NOT write to .nightshift/notes.md (the orchestrator manages it)
+5. Exit cleanly
 `
 }
 
@@ -285,15 +297,13 @@ export async function init(): Promise<void> {
   })
   if (p.isCancel(missionType)) cancel()
 
-  // Step 3: Mission scope
-  const missionScope = await p.text({
-    message: 'Describe the mission scope. What should the agent work on?',
-    placeholder: MISSION_PLACEHOLDERS[missionType],
-    validate: (v) => {
-      if (!v.trim()) return 'Mission scope is required'
-    },
+  // Step 3: Steering guidance (optional)
+  const guidance = await p.text({
+    message: 'Any steering guidance? Where should the agent start? (optional)',
+    placeholder: GUIDANCE_PLACEHOLDERS[missionType],
+    defaultValue: '',
   })
-  if (p.isCancel(missionScope)) cancel()
+  if (p.isCancel(guidance)) cancel()
 
   // Step 4: Constraints
   const constraints = await p.text({
@@ -434,7 +444,7 @@ export async function init(): Promise<void> {
   const metaPrompt = buildMetaPrompt({
     projectInfo,
     missionType,
-    missionScope,
+    guidance: guidance || '',
     constraints: constraints || '',
     evalCommands,
     existingContext,
@@ -452,7 +462,7 @@ export async function init(): Promise<void> {
       template,
       projectName: projectInfo.name,
       missionType,
-      missionScope,
+      guidance: guidance || '',
       constraints: constraints || '',
       evalCommands,
       excludeDirs: config.exclude,

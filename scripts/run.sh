@@ -432,10 +432,15 @@ while [ "$iteration" -lt "$MAX_ITERATIONS" ]; do
     git reset -- "$LOG_DIR"/*.log > /dev/null 2>&1 || true
 
     if git diff --cached --quiet; then
-      # No changes to commit — agent did nothing or only read files
-      log "  NO CHANGES: agent produced no code changes, skipping commit"
-      echo "- **Iteration $iteration** ($(date '+%H:%M')): no changes (eval passed but nothing modified)" >> "$NIGHTSHIFT_DIR/notes.md"
-      consecutive_failures=0
+      # No changes — agent failed to produce work. Treat as failure.
+      log "  NO CHANGES: agent produced no code changes. Treating as failure."
+      echo "- **Iteration $iteration** ($(date '+%H:%M')): FAILED, no code changes produced" >> "$NIGHTSHIFT_DIR/notes.md"
+      consecutive_failures=$((consecutive_failures + 1))
+
+      if [ "$consecutive_failures" -ge "$MAX_CONSECUTIVE_FAILURES" ]; then
+        log "CIRCUIT BREAKER: $MAX_CONSECUTIVE_FAILURES consecutive failures. Stopping."
+        break
+      fi
     else
       # Append to notes BEFORE commit so notes are included in the commit
       echo "- **Iteration $iteration** ($(date '+%H:%M')): $summary" >> "$NIGHTSHIFT_DIR/notes.md"
