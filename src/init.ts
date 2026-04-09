@@ -456,10 +456,11 @@ export async function init(): Promise<void> {
 
   try {
     programContent = await runClaudeAsync(metaPrompt, cwd, 120_000)
-    spin.stop('Generated program.md with Claude')
-  } catch {
+    spin.stop('Generated program.md')
+  } catch (err) {
     claudeAvailable = false
-    spin.stop('Claude CLI not available, using template')
+    const reason = err instanceof Error ? err.message : 'unknown error'
+    spin.stop(`Could not run claude -p (${reason}), using template`)
 
     const template = loadTemplate()
     programContent = buildFallbackProgram({
@@ -472,15 +473,12 @@ export async function init(): Promise<void> {
       excludeDirs: config.exclude,
     })
 
-    p.log.warn('Used template fallback. Edit .nightshift/program.md to customize.')
+    p.log.warn('Edit .nightshift/program.md to customize the agent instructions.')
   }
 
   fs.writeFileSync(path.join(nightshiftDir, 'program.md'), programContent + '\n', 'utf-8')
-  p.log.success('Wrote .nightshift/program.md')
 
   // Step 12: Discovery pass - generate codebase.md
-  // This gives every future iteration a CTO-level understanding of the codebase:
-  // architecture, dependency map, invariants, danger zones.
   const codebasePath = path.join(nightshiftDir, 'codebase.md')
 
   if (claudeAvailable) {
@@ -492,27 +490,22 @@ export async function init(): Promise<void> {
 
       fs.writeFileSync(codebasePath, codebaseContent + '\n', 'utf-8')
       spin.stop(`Codebase overview generated (${(codebaseContent.length / 1024).toFixed(1)}KB)`)
-      p.log.success('Wrote .nightshift/codebase.md')
     } catch {
-      spin.stop('Discovery skipped (will run on first nightshift run instead)')
+      spin.stop('Discovery will run automatically on first nightshift run')
     }
   } else {
-    p.log.info('Codebase discovery will run on first nightshift run')
+    p.log.info('Codebase discovery will run automatically on first nightshift run')
   }
 
-  // Step 13: Create empty notes.md
+  // Step 13: Create notes, logs, update .gitignore (silently)
   const notesPath = path.join(nightshiftDir, 'notes.md')
   if (!fs.existsSync(notesPath)) {
-    fs.writeFileSync(notesPath, '# Nightshift Notes\n\nThis file is shared between iterations. The agent appends notes here.\n', 'utf-8')
+    fs.writeFileSync(notesPath, '# Nightshift Notes\n', 'utf-8')
   }
-  p.log.success('Created .nightshift/notes.md')
 
-  // Step 13: Create logs directory
   const logsDir = path.join(nightshiftDir, 'logs')
   fs.mkdirSync(logsDir, { recursive: true })
-  p.log.success('Created .nightshift/logs/')
 
-  // Step 14: Update .gitignore
   const gitignorePath = path.join(cwd, '.gitignore')
   const gitignoreEntries = [
     '.nightshift/logs/',
@@ -534,11 +527,10 @@ export async function init(): Promise<void> {
   if (missingEntries.length > 0) {
     const block = '\n# nightshift\n' + missingEntries.join('\n') + '\n'
     fs.appendFileSync(gitignorePath, block, 'utf-8')
-    p.log.success('Updated .gitignore')
   }
 
   // Done
   p.outro(
-    `${pc.green('Ready.')} Review ${pc.bold('.nightshift/program.md')}, then run: ${pc.cyan('nightshift run')}`
+    `${pc.green('Ready.')} Run ${pc.cyan('nightshift run')} to start the loop.`
   )
 }
