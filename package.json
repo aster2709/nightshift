@@ -42,7 +42,7 @@
   "author": "Yash Mehta <yash@0xaster.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/0xAster/nightshift"
+    "url": "https://github.com/aster2709/nightshift"
   },
   "engines": {
     "node": ">=18"

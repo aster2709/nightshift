@@ -1,8 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { execSync, spawn } from 'node:child_process'
 import * as p from '@clack/prompts'
 import pc from 'picocolors'
+
+// Node 18-20 compat: import.meta.dirname only exists in Node 21+
+const __dirname = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url))
 import { writeConfig, DEFAULT_CONFIG, NIGHTSHIFT_DIR } from './config.js'
 import type { NightshiftConfig } from './config.js'
 import { detectProject, detectEvalCommands, detectExistingContext } from './detect.js'
@@ -68,7 +72,7 @@ function runClaudeAsync(prompt: string, cwd: string, timeout = 180_000): Promise
 function loadDiscoveryPrompt(cwd: string): string {
   // Find the discovery prompt template
   const candidates = [
-    path.join(import.meta.dirname ?? '', '..', 'templates', 'discovery.prompt.md'),
+    path.join(__dirname, '..', 'templates', 'discovery.prompt.md'),
     path.resolve(new URL('../../templates/discovery.prompt.md', import.meta.url).pathname),
   ]
 
@@ -212,7 +216,7 @@ function buildFallbackProgram(opts: {
 
 function loadTemplate(): string {
   const candidates = [
-    path.join(import.meta.dirname ?? '', '..', 'templates', 'program.template.md'),
+    path.join(__dirname, '..', 'templates', 'program.template.md'),
     path.join(process.cwd(), 'templates', 'program.template.md'),
     path.resolve(new URL('../../templates/program.template.md', import.meta.url).pathname),
   ]
