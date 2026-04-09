@@ -28,10 +28,12 @@ If any command fails, fix the issue before exiting. Never leave evals broken.
 Follow this process for every iteration:
 
 ### 1. Orient
+- Read the `<codebase-overview>` section in your prompt. It maps dependencies and danger zones.
 - Read `.nightshift/notes.md` for context from previous iterations
 - Run `git log --oneline -10` to understand recent changes
 - Identify the highest-impact task within your mission scope
 - Do NOT repeat work already done in previous iterations
+- If you are changing a shared file, check the Dependency Map to understand what depends on it
 
 ### 2. Plan
 - Break the task into small, testable steps

@@ -126,12 +126,17 @@ export async function status(): Promise<void> {
     lastText = `"${msg}"` + (time ? pc.dim(` (${time})`) : '')
   }
 
+  // Check codebase overview
+  const codebasePath = path.join(cwd, NIGHTSHIFT_DIR, 'codebase.md')
+  const hasCodebase = fs.existsSync(codebasePath)
+
   // Display
   console.log()
   console.log(pc.bold(pc.cyan('nightshift')) + ' status')
   console.log()
   console.log(`  ${pc.dim('Branch:')}       ${pc.white(currentBranch)}`)
   console.log(`  ${pc.dim('Status:')}       ${statusText}`)
+  console.log(`  ${pc.dim('Discovery:')}    ${hasCodebase ? pc.green('codebase.md generated') : pc.yellow('pending (runs on first nightshift run)')}`)
   console.log(`  ${pc.dim('Iterations:')}   ${pc.white(String(notes.total))} attempted, ${pc.green(String(notes.committed))} committed, ${pc.red(String(notes.failed))} failed`)
   console.log(`  ${pc.dim('Commits:')}      ${pc.white(commitCount)} on branch`)
   console.log(`  ${pc.dim('Last:')}         ${lastText}`)

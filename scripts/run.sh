@@ -237,10 +237,84 @@ done
 echo "================================================================"
 echo ""
 
+# ── Discovery pass (iteration 0) ──────────────────────────────────────────
+# Generates .nightshift/codebase.md if it doesn't exist. This gives every
+# future iteration a CTO-level understanding of the codebase: architecture,
+# dependency map, invariants, danger zones. Without this, agents change files
+# without realizing what depends on them.
+CODEBASE_FILE="$NIGHTSHIFT_DIR/codebase.md"
+
+run_discovery() {
+  log "Running discovery pass (iteration 0)..."
+  echo "  Generating codebase overview so future iterations understand the system."
+  echo ""
+
+  # Build discovery prompt. If CLAUDE.md exists, feed it as input context.
+  local discovery_prompt=""
+  local claude_md_content=""
+
+  # Find the discovery prompt template (shipped with the npm package)
+  local script_dir
+  script_dir="$(cd "$(dirname "$0")" && pwd)"
+  local template_path="$script_dir/../templates/discovery.prompt.md"
+
+  if [ -f "$template_path" ]; then
+    discovery_prompt=$(cat "$template_path")
+  else
+    # Inline fallback if template not found
+    discovery_prompt="Explore this entire codebase and produce a structured markdown overview with these sections: ## Purpose, ## Architecture, ## Dependency Map (critical: what depends on what), ## Key Patterns, ## Invariants (things that must never break), ## Style Guide (observed conventions), ## Danger Zones (high blast-radius files). Read actual files, do not guess. Output only the markdown."
+  fi
+
+  if [ -f "$PROJECT_DIR/CLAUDE.md" ]; then
+    claude_md_content=$(cat "$PROJECT_DIR/CLAUDE.md")
+    discovery_prompt="$discovery_prompt
+
+The project already has a CLAUDE.md with instructions/context. Use it as input but do NOT duplicate it.
+Your codebase.md should focus on UNDERSTANDING (architecture, dependencies, invariants) not INSTRUCTIONS.
+
+<existing-claude-md>
+$claude_md_content
+</existing-claude-md>"
+  fi
+
+  # Run Claude for discovery
+  local discovery_log="$LOG_DIR/iteration_0_discovery.log"
+
+  if run_with_timeout "$TIMEOUT" claude -p "$discovery_prompt" \
+    --model "$MODEL" \
+    --dangerously-skip-permissions \
+    --output-format text \
+    > "$discovery_log" 2>&1; then
+
+    # Validate output is substantial
+    local output_size
+    output_size=$(wc -c < "$discovery_log" | tr -d ' ')
+
+    if [ "$output_size" -gt 500 ]; then
+      cp "$discovery_log" "$CODEBASE_FILE"
+      log "  Discovery complete. Wrote codebase.md (${output_size} bytes)"
+    else
+      log "  WARNING: Discovery output too short (${output_size} bytes). Skipping codebase.md."
+      log "  The agent will run without a codebase overview."
+    fi
+  else
+    log "  WARNING: Discovery pass failed. The agent will run without a codebase overview."
+  fi
+
+  echo ""
+}
+
+if [ ! -f "$CODEBASE_FILE" ]; then
+  run_discovery
+else
+  log "Codebase overview exists, skipping discovery."
+fi
+
 # ── Prompt builder ─────────────────────────────────────────────────────────
 build_prompt() {
   local program_content=""
   local notes_content=""
+  local codebase_content=""
 
   if [ -f "$NIGHTSHIFT_DIR/program.md" ]; then
     program_content=$(cat "$NIGHTSHIFT_DIR/program.md")
@@ -250,8 +324,16 @@ build_prompt() {
     notes_content=$(cat "$NIGHTSHIFT_DIR/notes.md")
   fi
 
+  if [ -f "$CODEBASE_FILE" ]; then
+    codebase_content=$(cat "$CODEBASE_FILE")
+  fi
+
   cat <<PROMPT
 You are running inside Nightshift, an autonomous development loop. Complete ONE unit of work and exit.
+
+<codebase-overview>
+$codebase_content
+</codebase-overview>
 
 <program>
 $program_content
@@ -262,6 +344,9 @@ $notes_content
 </previous-iterations>
 
 This is iteration $((iteration + 1)) of $MAX_ITERATIONS. Pick ONE task, complete it fully, then exit.
+
+IMPORTANT: Read the <codebase-overview> carefully before making changes. It maps which modules
+depend on which. If you change a shared file, check all its dependents. Do not break what is working.
 
 When done, write a single-line summary of what you did to .nightshift/summary.txt (overwrite the file).
 Do NOT write to .nightshift/notes.md, the orchestrator manages that file.

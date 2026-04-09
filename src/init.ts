@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { execSync } from 'node:child_process'
+import { execSync, spawn } from 'node:child_process'
 import * as p from '@clack/prompts'
 import pc from 'picocolors'
 import { writeConfig, DEFAULT_CONFIG, NIGHTSHIFT_DIR } from './config.js'
@@ -20,6 +20,99 @@ const MISSION_PLACEHOLDERS: Record<MissionType, string> = {
 function cancel(message = 'Init cancelled.'): never {
   p.cancel(message)
   process.exit(0)
+}
+
+const DISCOVERY_MESSAGES = [
+  'Mapping project structure...',
+  'Reading source files...',
+  'Tracing module dependencies...',
+  'Identifying architectural patterns...',
+  'Cataloging shared types and interfaces...',
+  'Analyzing import chains...',
+  'Detecting high blast-radius files...',
+  'Learning error handling conventions...',
+  'Mapping data flow between systems...',
+  'Documenting API contracts...',
+  'Identifying invariants and business rules...',
+  'Cataloging test patterns...',
+  'Analyzing naming conventions...',
+  'Building dependency graph...',
+  'Identifying danger zones...',
+  'Understanding the harmony between modules...',
+  'Almost there, finalizing overview...',
+]
+
+function runClaudeAsync(prompt: string, cwd: string, timeout = 180_000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const tmpFile = path.join(cwd, NIGHTSHIFT_DIR, '.tmp_prompt.txt')
+    fs.writeFileSync(tmpFile, prompt, 'utf-8')
+
+    const child = spawn('claude', [
+      '-p', fs.readFileSync(tmpFile, 'utf-8'),
+      '--output-format', 'text',
+    ], {
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: process.env,
+    })
+
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+    child.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM')
+      reject(new Error('Claude timed out'))
+    }, timeout)
+
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      try { fs.unlinkSync(tmpFile) } catch {}
+      if (code === 0 && stdout.trim().length > 100) {
+        resolve(stdout.trim())
+      } else {
+        reject(new Error(stderr || `Claude exited with code ${code}`))
+      }
+    })
+
+    child.on('error', (err) => {
+      clearTimeout(timer)
+      try { fs.unlinkSync(tmpFile) } catch {}
+      reject(err)
+    })
+  })
+}
+
+function loadDiscoveryPrompt(cwd: string): string {
+  // Find the discovery prompt template
+  const candidates = [
+    path.join(import.meta.dirname ?? '', '..', 'templates', 'discovery.prompt.md'),
+    path.resolve(new URL('../../templates/discovery.prompt.md', import.meta.url).pathname),
+  ]
+
+  let prompt = ''
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        prompt = fs.readFileSync(candidate, 'utf-8')
+        break
+      }
+    } catch { continue }
+  }
+
+  if (!prompt) {
+    prompt = 'Explore this entire codebase and produce a structured markdown overview with these sections: ## Purpose, ## Architecture, ## Dependency Map (critical: what depends on what, "if you change X check Y"), ## Key Patterns, ## Invariants (things that must never break), ## Style Guide (observed conventions), ## Danger Zones (high blast-radius files and why). Read actual files, do not guess. Output only the markdown.'
+  }
+
+  // If CLAUDE.md exists, append it as context
+  const claudeMdPath = path.join(cwd, 'CLAUDE.md')
+  if (fs.existsSync(claudeMdPath)) {
+    const content = fs.readFileSync(claudeMdPath, 'utf-8')
+    prompt += `\n\nThe project already has a CLAUDE.md. Use it as input but do NOT duplicate it. Your codebase.md focuses on UNDERSTANDING (architecture, dependencies, invariants) not INSTRUCTIONS.\n\n<existing-claude-md>\n${content}\n</existing-claude-md>`
+  }
+
+  return prompt
 }
 
 function buildMetaPrompt(opts: {
@@ -65,8 +158,12 @@ Generate a complete program.md with these sections:
 2. Mission with specific, actionable tasks derived from the scope
 3. Constraints and boundaries
 4. Eval commands the agent must run and pass
-5. Workflow: orient (read notes.md), plan, implement, verify evals, exit
+5. Workflow: orient (read the <codebase-overview> for architecture + dependency map, read notes.md for previous iteration context), plan, implement, verify evals, exit
 6. Before exiting: run evals, write a one-line summary to .nightshift/summary.txt (overwrite), then exit
+
+IMPORTANT WORKFLOW NOTE: The agent receives a <codebase-overview> in its prompt containing architecture,
+dependency map, invariants, and danger zones. The program.md should instruct the agent to read this
+before touching any code, especially before modifying shared files.
 
 IMPORTANT: The agent must NOT write to .nightshift/notes.md. The orchestrator script manages that file.
 The agent must ONLY write to .nightshift/summary.txt (one line, overwrite).
@@ -348,6 +445,7 @@ export async function init(): Promise<void> {
 
   // Step 11: Generate program.md
   let programContent: string | null = null
+  let claudeAvailable = true
 
   spin.start('Generating program.md with Claude...')
   const existingContext = await detectExistingContext(cwd)
@@ -362,30 +460,10 @@ export async function init(): Promise<void> {
   })
 
   try {
-    // Write prompt to temp file to avoid shell escaping issues
-    const tmpPrompt = path.join(NIGHTSHIFT_DIR, '.tmp_prompt.txt')
-    fs.writeFileSync(path.join(cwd, tmpPrompt), metaPrompt, 'utf-8')
-
-    programContent = execSync(
-      `claude -p "$(cat ${tmpPrompt})" --output-format text`,
-      {
-        cwd,
-        encoding: 'utf-8',
-        timeout: 120_000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }
-    ).trim()
-
-    // Clean up temp file
-    fs.unlinkSync(path.join(cwd, tmpPrompt))
-
-    // Sanity check: if output is too short or looks like an error
-    if (!programContent || programContent.length < 100) {
-      throw new Error('Output too short, likely an error')
-    }
-
+    programContent = await runClaudeAsync(metaPrompt, cwd, 120_000)
     spin.stop('Generated program.md with Claude')
   } catch {
+    claudeAvailable = false
     spin.stop('Claude CLI not available, using template')
 
     const template = loadTemplate()
@@ -405,7 +483,38 @@ export async function init(): Promise<void> {
   fs.writeFileSync(path.join(nightshiftDir, 'program.md'), programContent + '\n', 'utf-8')
   p.log.success('Wrote .nightshift/program.md')
 
-  // Step 12: Create empty notes.md
+  // Step 12: Discovery pass - generate codebase.md
+  // This gives every future iteration a CTO-level understanding of the codebase:
+  // architecture, dependency map, invariants, danger zones.
+  const codebasePath = path.join(nightshiftDir, 'codebase.md')
+
+  if (claudeAvailable) {
+    spin.start(DISCOVERY_MESSAGES[0])
+
+    // Rotate spinner messages while Claude explores
+    let msgIndex = 0
+    const messageInterval = setInterval(() => {
+      msgIndex = (msgIndex + 1) % DISCOVERY_MESSAGES.length
+      spin.message(DISCOVERY_MESSAGES[msgIndex])
+    }, 4000)
+
+    try {
+      const discoveryPrompt = loadDiscoveryPrompt(cwd)
+      const codebaseContent = await runClaudeAsync(discoveryPrompt, cwd, 180_000)
+
+      clearInterval(messageInterval)
+      fs.writeFileSync(codebasePath, codebaseContent + '\n', 'utf-8')
+      spin.stop(`Codebase overview generated (${(codebaseContent.length / 1024).toFixed(1)}KB)`)
+      p.log.success('Wrote .nightshift/codebase.md')
+    } catch {
+      clearInterval(messageInterval)
+      spin.stop('Discovery skipped (will run on first nightshift run instead)')
+    }
+  } else {
+    p.log.info('Codebase discovery will run on first nightshift run')
+  }
+
+  // Step 13: Create empty notes.md
   const notesPath = path.join(nightshiftDir, 'notes.md')
   if (!fs.existsSync(notesPath)) {
     fs.writeFileSync(notesPath, '# Nightshift Notes\n\nThis file is shared between iterations. The agent appends notes here.\n', 'utf-8')
@@ -423,6 +532,7 @@ export async function init(): Promise<void> {
     '.nightshift/logs/',
     '.nightshift/summary.txt',
     '.nightshift/notes.md',
+    '.nightshift/codebase.md',
   ]
 
   let gitignoreContent = ''

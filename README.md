@@ -19,6 +19,17 @@ nightshift status  # check progress
 ## How It Works
 
 ```
+nightshift init
+  |
+  +--> Detect project type, ask mission/constraints/eval
+  |
+  +--> Generate program.md (agent instructions)
+  |
+  +--> Discovery: Claude explores the entire codebase and
+  |    generates .nightshift/codebase.md - architecture,
+  |    dependency map, invariants, danger zones.
+  |    (spinner with rotating status messages while you wait)
+
 nightshift run
   |
   +--> Preflight: clean git? eval green? claude CLI exists?
@@ -27,7 +38,9 @@ nightshift run
   |
   +--> Loop:
   |      |
-  |      +--> Claude does ONE unit of work
+  |      +--> Claude reads codebase.md + program.md + notes.md
+  |      |
+  |      +--> Does ONE unit of work
   |      |
   |      +--> Eval gate (your commands, in order)
   |      |      |
@@ -52,6 +65,7 @@ nightshift run
 Creates `.nightshift/` with:
 - `config.json` - your eval commands, branch, limits
 - `program.md` - the agent's instruction set (you own this, edit freely)
+- `codebase.md` - auto-generated codebase overview (generated on first run)
 - `notes.md` - cross-iteration context (managed by nightshift)
 - `logs/` - per-iteration Claude output
 
@@ -89,7 +103,27 @@ Auto-detection supports: Node.js (npm/pnpm/yarn/bun), Python (pytest/mypy/ruff),
 
 CLI overrides: `nightshift run --iterations 50 --timeout 1800 --branch nightshift/feature-x`
 
+## Discovery Pass
+
+During `nightshift init`, after generating program.md, a discovery pass generates `.nightshift/codebase.md`. This is a structured, CTO-level overview of your codebase:
+
+| Section | What It Captures |
+|---|---|
+| **Purpose** | What the project does, who it serves |
+| **Architecture** | System map, major modules, data flow |
+| **Dependency Map** | "If you change X, check Y" for every major module |
+| **Key Patterns** | Error handling, validation, naming conventions |
+| **Invariants** | Things that must never break (API contracts, security, schemas) |
+| **Style Guide** | Observed formatting, test patterns, import order |
+| **Danger Zones** | High blast-radius files and why they're dangerous |
+
+Every iteration reads this before touching code. This prevents the #1 agent failure mode: changing a file without realizing 12 other files import from it.
+
+If your project already has a `CLAUDE.md`, nightshift reads it as input but generates its own file focused on *understanding* (architecture, dependencies) rather than *instructions* (what to do).
+
 ## Key Design Decisions
+
+**Discovery before work.** The agent maps the entire codebase before writing a single line. Like a CTO onboarding a new engineer: understand the system first, then change it.
 
 **Bash loop, not Node loop.** The core orchestrator is a shell script. Zero runtime deps for a process that runs 8+ hours unattended.
 
