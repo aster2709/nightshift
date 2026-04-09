@@ -164,7 +164,7 @@ Generate a complete program.md with these sections:
 
 5. Eval commands: list them, agent must run and pass all before exiting.
 
-6. CRITICAL RULE: The agent must ALWAYS produce code changes. Exiting without modifying any source files is a failure. If previous work seems "done," look harder. There is always work to do.
+6. CRITICAL RULE: The agent must ALWAYS produce code changes. Exiting without modifying any source files is a failure. The feature space is INFINITE. If the obvious work is done, think bigger: new modules, integrations, utilities, data structures, API layers, parsers, CLI tools. A codebase can always grow. "Looks complete" is never true.
 
 7. Before exiting: run evals, write a one-line summary to .nightshift/summary.txt (overwrite), then exit.
    Do NOT write to .nightshift/notes.md — the orchestrator manages that file.

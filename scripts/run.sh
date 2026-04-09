@@ -343,10 +343,15 @@ $program_content
 $notes_content
 </previous-iterations>
 
-This is iteration $((iteration + 1)) of $MAX_ITERATIONS. Pick ONE task, complete it fully, then exit.
+This is iteration $((iteration + 1)) of $MAX_ITERATIONS.
 
-IMPORTANT: Read the <codebase-overview> carefully before making changes. It maps which modules
-depend on which. If you change a shared file, check all its dependents. Do not break what is working.
+RULES:
+1. Complete ONE coherent unit of work this iteration. It can be as small or large as makes sense.
+2. You MUST produce code changes. Exiting without modifying source files is a failure and wastes an iteration.
+3. The feature space is INFINITE. There is ALWAYS something to build. If the obvious things are done, think bigger: new modules, new integrations, utilities, data structures, API layers, CLI tools, statistical functions, converters, parsers. Get creative. Get inspired by what the codebase could become, not just what it currently lacks.
+4. Read <previous-iterations> to build on what came before. Don't repeat work, but NEVER stop because previous work "looks complete." It is never complete. A codebase can always grow.
+5. Read <codebase-overview> before touching code. Check dependencies. Don't break what works.
+6. Follow the project's existing patterns, naming conventions, and style exactly.
 
 When done, write a single-line summary of what you did to .nightshift/summary.txt (overwrite the file).
 Do NOT write to .nightshift/notes.md, the orchestrator manages that file.
