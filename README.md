@@ -1,6 +1,12 @@
-# nightshift
+<p align="center">
+  <img src="assets/logo.png" alt="nightshift" width="200" />
+</p>
 
-Autonomous overnight development loop for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Sleep while your codebase ships.
+<h1 align="center">nightshift</h1>
+
+<p align="center">
+  Autonomous overnight development loop for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>. Sleep while your codebase ships.
+</p>
 
 Nightshift runs Claude in a headless loop. Each iteration: Claude picks one unit of work, completes it, and an eval gate (your tests, typecheck, lint) verifies quality. Pass = commit. Fail = reset and retry. Wake up to a branch with N CI-green commits.
 
