@@ -71,4 +71,21 @@ program
     await status()
   })
 
+program
+  .command('logs [iteration]')
+  .description('Show iteration logs')
+  .option('-l, --list', 'list all available logs')
+  .action(async (iteration, opts) => {
+    const { logs } = await import('./logs.js')
+    await logs(iteration ? parseInt(iteration, 10) : undefined, opts)
+  })
+
+program
+  .command('diff')
+  .description('Show changes on the nightshift branch vs base')
+  .action(async () => {
+    const { diff } = await import('./diff.js')
+    await diff()
+  })
+
 program.parse()
