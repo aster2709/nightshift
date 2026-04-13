@@ -3,6 +3,13 @@ import path from 'node:path'
 
 export const NIGHTSHIFT_DIR = '.nightshift'
 
+export type Mode = 'features' | 'improve' | 'both' | 'custom'
+export type AfterQueue = 'stop' | 'autonomous'
+
+export interface WorkItem {
+  task: string
+}
+
 export interface NightshiftConfig {
   eval: string[]
   branch: string
@@ -11,6 +18,14 @@ export interface NightshiftConfig {
   timeout: number
   model: string
   exclude: string[]
+  // v0.2.0
+  mode: Mode
+  constraints: string
+  customMission: string
+  workQueue: WorkItem[]
+  afterQueue: AfterQueue
+  plannerModel: string
+  evaluatorModel: string
 }
 
 export const DEFAULT_CONFIG: NightshiftConfig = {
@@ -21,6 +36,18 @@ export const DEFAULT_CONFIG: NightshiftConfig = {
   timeout: 900,
   model: 'claude-opus-4-6',
   exclude: [],
+  // v0.2.0
+  mode: 'features',
+  constraints: '',
+  customMission: '',
+  workQueue: [],
+  afterQueue: 'autonomous',
+  plannerModel: 'claude-sonnet-4-6',
+  evaluatorModel: 'claude-sonnet-4-6',
+}
+
+export function isV2Config(config: NightshiftConfig): boolean {
+  return 'mode' in config && config.mode !== undefined
 }
 
 function configPath(projectDir: string): string {

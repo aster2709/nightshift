@@ -2,7 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execSync } from 'node:child_process'
 import pc from 'picocolors'
-import { configExists, readConfig, NIGHTSHIFT_DIR } from './config.js'
+import { configExists, readConfig, isV2Config, NIGHTSHIFT_DIR } from './config.js'
+import { loadState } from './state.js'
 
 function exec(cmd: string, cwd: string): string {
   try {
@@ -14,73 +15,20 @@ function exec(cmd: string, cwd: string): string {
 
 function isRunning(): boolean {
   try {
-    const result = execSync('pgrep -f "run\\.sh"', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] })
+    // Check for running orchestrator or run.sh
+    const result = execSync('pgrep -f "nightshift.*run"', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] })
     return result.trim().length > 0
   } catch {
     return false
   }
 }
 
-interface NotesInfo {
-  total: number
-  committed: number
-  failed: number
-  lastEntry: string
-  firstTime: string
-  lastTime: string
-}
-
-function parseNotes(notesPath: string): NotesInfo {
-  if (!fs.existsSync(notesPath)) {
-    return { total: 0, committed: 0, failed: 0, lastEntry: '', firstTime: '', lastTime: '' }
-  }
-
-  const content = fs.readFileSync(notesPath, 'utf-8')
-  const lines = content.split('\n').filter(Boolean)
-
-  let total = 0
-  let failed = 0
-  let lastEntry = ''
-  let firstTime = ''
-  let lastTime = ''
-
-  for (const line of lines) {
-    if (line.startsWith('- **Iteration')) {
-      total++
-      if (line.includes('FAILED')) {
-        failed++
-      }
-      const time = extractTimestamp(line)
-      if (time && !firstTime) firstTime = time
-      if (time) lastTime = time
-      lastEntry = line
-    }
-  }
-
-  const committed = total - failed
-
-  return { total, committed, failed, lastEntry, firstTime, lastTime }
-}
-
-function extractLastMessage(entry: string): string {
-  const colonMatch = entry.match(/\):\s*(.+)$/)
-  if (colonMatch) return colonMatch[1].trim()
-  return entry.slice(0, 60)
-}
-
-function extractTimestamp(entry: string): string {
-  const timeMatch = entry.match(/\((\d{2}:\d{2})\)/)
-  if (timeMatch) return timeMatch[1]
-  return ''
-}
-
-function getTimingFromLogs(logsDir: string): { avgSeconds: number, totalMinutes: number, count: number } {
+function getTimingFromLogs(logsDir: string): { avgSeconds: number; totalMinutes: number; count: number } {
   if (!fs.existsSync(logsDir)) return { avgSeconds: 0, totalMinutes: 0, count: 0 }
 
   const files = fs.readdirSync(logsDir).filter(f => f.startsWith('iteration_') && f.endsWith('.log'))
-  if (files.length === 0) return { avgSeconds: 0, totalMinutes: 0, count: 0 }
+  if (files.length < 2) return { avgSeconds: 0, totalMinutes: 0, count: files.length }
 
-  // Get timing from file modification timestamps (start = previous file's mtime, end = this file's mtime)
   const stats = files
     .sort((a, b) => {
       const numA = parseInt(a.match(/\d+/)?.[0] || '0')
@@ -89,17 +37,18 @@ function getTimingFromLogs(logsDir: string): { avgSeconds: number, totalMinutes:
     })
     .map(f => fs.statSync(path.join(logsDir, f)).mtimeMs)
 
-  if (stats.length < 2) {
-    // Single log: estimate from file creation to modification
-    return { avgSeconds: 0, totalMinutes: 0, count: files.length }
-  }
-
-  // Total time = last log mtime - first log mtime
   const totalMs = stats[stats.length - 1] - stats[0]
   const totalMinutes = Math.round(totalMs / 60000)
   const avgSeconds = Math.round(totalMs / (stats.length - 1) / 1000)
 
   return { avgSeconds, totalMinutes, count: files.length }
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
 }
 
 export async function status(): Promise<void> {
@@ -111,12 +60,10 @@ export async function status(): Promise<void> {
   }
 
   const config = readConfig(cwd)
-  const notesPath = path.join(cwd, NIGHTSHIFT_DIR, 'notes.md')
-  const notes = parseNotes(notesPath)
+  const v2 = isV2Config(config)
 
   // Git info
   const currentBranch = exec('git branch --show-current', cwd) || 'unknown'
-
   let commitCount = ''
   let baseBranch = ''
   for (const base of ['main', 'master']) {
@@ -131,74 +78,101 @@ export async function status(): Promise<void> {
     commitCount = exec('git rev-list --count HEAD', cwd) || '0'
   }
 
-  // Timing
-  const logsDir = path.join(cwd, NIGHTSHIFT_DIR, 'logs')
-  const timing = getTimingFromLogs(logsDir)
-
   // Running status
   const running = isRunning()
-  let statusText: string
-  if (running) {
-    statusText = pc.green(pc.bold('Running')) + pc.dim(` (iteration ${notes.total + 1})`)
-  } else if (notes.total > 0) {
-    statusText = pc.yellow('Stopped')
-  } else {
-    statusText = pc.dim('Not started')
-  }
-
-  // Last entry
-  let lastText = pc.dim('none')
-  if (notes.lastEntry) {
-    const msg = extractLastMessage(notes.lastEntry)
-    const time = extractTimestamp(notes.lastEntry)
-    lastText = `"${msg}"` + (time ? pc.dim(` (${time})`) : '')
-  }
-
-  // Success rate
-  const successRate = notes.total > 0
-    ? `${Math.round((notes.committed / notes.total) * 100)}%`
-    : '-'
-
-  // Codebase overview
-  const codebasePath = path.join(cwd, NIGHTSHIFT_DIR, 'codebase.md')
-  const hasCodebase = fs.existsSync(codebasePath)
 
   // Display
   console.log()
   console.log(pc.bold(pc.cyan('nightshift')) + ' status')
   console.log()
   console.log(`  ${pc.dim('Branch:')}       ${pc.white(currentBranch)}`)
-  console.log(`  ${pc.dim('Status:')}       ${statusText}`)
-  console.log(`  ${pc.dim('Discovery:')}    ${hasCodebase ? pc.green('ready') : pc.yellow('pending')}`)
-  console.log()
-  console.log(`  ${pc.dim('Iterations:')}   ${pc.white(String(notes.total))} attempted, ${pc.green(String(notes.committed))} committed, ${pc.red(String(notes.failed))} failed`)
-  console.log(`  ${pc.dim('Success rate:')} ${pc.white(successRate)}`)
-  console.log(`  ${pc.dim('Commits:')}      ${pc.white(commitCount)} on branch`)
 
-  if (timing.avgSeconds > 0) {
+  if (v2) {
+    const state = loadState(cwd)
+    const total = state.completed.length + state.failed.length + state.blocked.length
+    const successRate = total > 0
+      ? `${Math.round((state.completed.length / (state.completed.length + state.failed.length || 1)) * 100)}%`
+      : '-'
+
+    // Status
+    let statusText: string
+    if (running) {
+      statusText = pc.green(pc.bold('Running')) + pc.dim(` (iteration ${state.iteration + 1})`)
+    } else if (state.iteration > 0) {
+      statusText = pc.yellow('Stopped')
+    } else {
+      statusText = pc.dim('Not started')
+    }
+
+    console.log(`  ${pc.dim('Status:')}       ${statusText}`)
+    console.log(`  ${pc.dim('Mode:')}         ${pc.white(config.mode)}`)
     console.log()
-    console.log(`  ${pc.dim('Avg per run:')}  ${pc.white(formatDuration(timing.avgSeconds))}`)
-    console.log(`  ${pc.dim('Total time:')}   ${pc.white(timing.totalMinutes + 'm')}`)
-  }
 
-  if (notes.firstTime && notes.lastTime && notes.firstTime !== notes.lastTime) {
-    console.log(`  ${pc.dim('Session:')}      ${pc.white(notes.firstTime)} - ${pc.white(notes.lastTime)}`)
-  }
+    // Iteration stats
+    console.log(`  ${pc.dim('Iterations:')}   ${pc.white(String(state.iteration))} run`)
+    console.log(`  ${pc.dim('Committed:')}    ${pc.green(String(state.completed.length))}`)
+    console.log(`  ${pc.dim('Failed:')}       ${pc.red(String(state.failed.length))}`)
+    console.log(`  ${pc.dim('Blocked:')}      ${pc.yellow(String(state.blocked.length))}`)
+    console.log(`  ${pc.dim('Success rate:')} ${pc.white(successRate)}`)
+    console.log(`  ${pc.dim('Commits:')}      ${pc.white(commitCount)} on branch`)
 
-  console.log()
-  console.log(`  ${pc.dim('Last:')}         ${lastText}`)
+    // Work queue progress
+    if (config.workQueue.length > 0) {
+      const done = Object.values(state.queueProgress).filter(s => s === 'done').length
+      const blocked = Object.values(state.queueProgress).filter(s => s === 'blocked').length
+      const pending = config.workQueue.length - done - blocked
+
+      console.log()
+      console.log(`  ${pc.dim('Work queue:')}   ${pc.green(String(done))} done, ${pc.yellow(String(pending))} pending, ${pc.red(String(blocked))} blocked`)
+      console.log(`  ${pc.dim('After queue:')}  ${config.afterQueue}`)
+    }
+
+    // Timing
+    const logsDir = path.join(cwd, NIGHTSHIFT_DIR, 'logs')
+    const timing = getTimingFromLogs(logsDir)
+    if (timing.avgSeconds > 0) {
+      console.log()
+      console.log(`  ${pc.dim('Avg per run:')}  ${pc.white(formatDuration(timing.avgSeconds))}`)
+      console.log(`  ${pc.dim('Total time:')}   ${pc.white(timing.totalMinutes + 'm')}`)
+    }
+
+    // Last completed task
+    if (state.completed.length > 0) {
+      const last = state.completed[state.completed.length - 1]
+      console.log()
+      console.log(`  ${pc.dim('Last commit:')}  "${last.summary}"`)
+    }
+
+    // Blocked tasks
+    if (state.blocked.length > 0) {
+      console.log()
+      console.log(`  ${pc.dim('Blocked:')}`)
+      for (const b of state.blocked) {
+        console.log(`    ${pc.red('-')} ${b.task}: ${pc.dim(b.reason)}`)
+      }
+    }
+
+  } else {
+    // v0.1.0 fallback — parse notes.md
+    console.log(`  ${pc.dim('Status:')}       ${pc.yellow('v0.1.0 config — run `nightshift init` to upgrade')}`)
+
+    const notesPath = path.join(cwd, NIGHTSHIFT_DIR, 'notes.md')
+    if (fs.existsSync(notesPath)) {
+      const content = fs.readFileSync(notesPath, 'utf-8')
+      const lines = content.split('\n').filter(l => l.startsWith('- **Iteration'))
+      const total = lines.length
+      const failed = lines.filter(l => l.includes('FAILED')).length
+      console.log()
+      console.log(`  ${pc.dim('Iterations:')}   ${pc.white(String(total))} attempted`)
+      console.log(`  ${pc.dim('Committed:')}    ${pc.green(String(total - failed))}`)
+      console.log(`  ${pc.dim('Failed:')}       ${pc.red(String(failed))}`)
+    }
+  }
 
   console.log()
   if (baseBranch) {
     console.log(pc.dim(`  Review: git log --oneline ${baseBranch}..${config.branch}`))
   }
-  console.log(pc.dim(`  Logs:   nightshift logs --list`))
+  console.log(pc.dim('  Logs:   nightshift logs --list'))
   console.log()
-}
-
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return s > 0 ? `${m}m ${s}s` : `${m}m`
 }
