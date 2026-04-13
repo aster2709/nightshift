@@ -340,11 +340,25 @@ export async function init(): Promise<void> {
     spin.stop('Discovery will run automatically on first nightshift run')
   }
 
-  // Initialize notes, logs, state
-  const notesPath = path.join(nightshiftDir, 'notes.md')
-  if (!fs.existsSync(notesPath)) {
-    fs.writeFileSync(notesPath, '# Nightshift Notes\n', 'utf-8')
+  // Clear previous run state (fresh start on re-init)
+  const statePath = path.join(nightshiftDir, 'state.json')
+  if (fs.existsSync(statePath)) fs.unlinkSync(statePath)
+
+  const logsPath = path.join(nightshiftDir, 'logs')
+  if (fs.existsSync(logsPath)) {
+    for (const f of fs.readdirSync(logsPath)) {
+      fs.unlinkSync(path.join(logsPath, f))
+    }
   }
+
+  for (const artifact of ['iteration.json', 'summary.txt']) {
+    const artifactPath = path.join(nightshiftDir, artifact)
+    if (fs.existsSync(artifactPath)) fs.unlinkSync(artifactPath)
+  }
+
+  // Reset notes and ensure logs dir
+  const notesPath = path.join(nightshiftDir, 'notes.md')
+  fs.writeFileSync(notesPath, '# Nightshift Notes\n', 'utf-8')
   fs.mkdirSync(path.join(nightshiftDir, 'logs'), { recursive: true })
 
   // Update .gitignore

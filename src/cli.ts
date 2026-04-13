@@ -81,6 +81,22 @@ program
   })
 
 program
+  .command('reset')
+  .description('Clear state and prepare for a fresh run')
+  .action(async () => {
+    const { reset } = await import('./reset.js')
+    await reset()
+  })
+
+program
+  .command('summary')
+  .description('Morning briefing: what nightshift did while you slept')
+  .action(async () => {
+    const { summary } = await import('./summary.js')
+    await summary()
+  })
+
+program
   .command('diff')
   .description('Show changes on the nightshift branch vs base')
   .action(async () => {

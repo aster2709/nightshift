@@ -103,3 +103,20 @@ export function findBaseBranch(cwd: string): string | null {
   if (branchExists('master', cwd)) return 'master'
   return null
 }
+
+export function isBranchBehind(branch: string, base: string, cwd: string): boolean {
+  // Check if base has commits that branch doesn't
+  const behind = execSafe(`git rev-list --count ${branch}..${base}`, cwd)
+  return parseInt(behind || '0', 10) > 0
+}
+
+export function rebaseOnto(base: string, cwd: string): boolean {
+  try {
+    exec(`git rebase ${base}`, cwd)
+    return true
+  } catch {
+    // Abort failed rebase
+    try { execSync('git rebase --abort', { cwd, stdio: 'pipe' }) } catch {}
+    return false
+  }
+}

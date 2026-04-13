@@ -129,10 +129,14 @@ function preflight(config: NightshiftConfig, cwd: string): void {
     process.exit(1)
   }
 
-  // Clean git state
+  // Clean git state — auto-clean if resuming after a Ctrl+C
   if (!git.isClean(cwd)) {
-    console.error(pc.red('Git working tree has uncommitted changes. Commit or stash first.'))
-    process.exit(1)
+    log('  dirty working tree detected — cleaning up from interrupted run...')
+    git.resetAll(cwd)
+    if (!git.isClean(cwd)) {
+      console.error(pc.red('Git working tree still has uncommitted changes after cleanup. Commit or stash manually.'))
+      process.exit(1)
+    }
   }
   log('  git state: clean')
 
@@ -273,6 +277,19 @@ async function runIteration(
 // ── Main Loop ────────────────────────────────────────────────────────────────
 
 export async function orchestrate(config: NightshiftConfig, cwd: string): Promise<void> {
+  // Graceful shutdown on Ctrl+C — clean up dirty working tree
+  let stopping = false
+  const shutdown = () => {
+    if (stopping) process.exit(1) // second Ctrl+C = force kill
+    stopping = true
+    log('Caught interrupt — cleaning up...')
+    try { git.resetAll(cwd) } catch {}
+    log('Working tree cleaned. Run `nightshift run` to resume.')
+    process.exit(0)
+  }
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
+
   // Preflight
   preflight(config, cwd)
 
@@ -281,6 +298,19 @@ export async function orchestrate(config: NightshiftConfig, cwd: string): Promis
   if (git.branchExists(config.branch, cwd)) {
     log(`Branch ${config.branch} exists, resuming...`)
     git.checkoutBranch(config.branch, cwd)
+
+    // If the nightshift branch is behind main (e.g. user merged + pushed new work),
+    // rebase to pick up those changes before starting
+    if (git.isBranchBehind(config.branch, sourceBranch, cwd)) {
+      log(`Branch is behind ${sourceBranch}, rebasing...`)
+      const ok = git.rebaseOnto(sourceBranch, cwd)
+      if (ok) {
+        log(`  Rebased onto ${sourceBranch}`)
+      } else {
+        console.error(pc.red(`Rebase onto ${sourceBranch} failed (conflicts). Resolve manually or run \`nightshift reset\`.`))
+        process.exit(1)
+      }
+    }
   } else {
     git.createBranch(config.branch, cwd)
     log(`Created branch: ${config.branch} (from ${sourceBranch})`)
@@ -329,7 +359,7 @@ export async function orchestrate(config: NightshiftConfig, cwd: string): Promis
   let consecutiveFailures = 0
   let noWorkAttempts = 0
 
-  while (state.iteration < config.maxIterations) {
+  while (state.iteration < config.maxIterations && !stopping) {
     state.iteration++
     const iterStart = Date.now()
 

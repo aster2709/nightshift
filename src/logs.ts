@@ -97,7 +97,8 @@ export async function logs(iteration: number | undefined, opts: LogsOptions): Pr
     return
   }
 
-  // Default: show the latest log
-  const latest = files[files.length - 1]
-  showLog(logsDir, latest)
+  // Default: show all logs
+  for (const file of files) {
+    showLog(logsDir, file)
+  }
 }
